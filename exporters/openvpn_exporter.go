@@ -26,11 +26,13 @@ type OpenvpnServerHeaderField struct {
 
 type OpenVPNExporter struct {
 	statusPaths                 []string
+	aliasPaths                  []string
 	openvpnUpDesc               *prometheus.Desc
 	openvpnStatusUpdateTimeDesc *prometheus.Desc
 	openvpnConnectedClientsDesc *prometheus.Desc
 	openvpnClientDescs          map[string]*prometheus.Desc
 	openvpnServerHeaders        map[string]OpenvpnServerHeader
+	openvpnClientAlias          *prometheus.Desc
 }
 
 func NewOpenVPNExporter(statusPaths []string, ignoreIndividuals bool) (*OpenVPNExporter, error) {
@@ -49,6 +51,10 @@ func NewOpenVPNExporter(statusPaths []string, ignoreIndividuals bool) (*OpenVPNE
 		prometheus.BuildFQName("openvpn", "", "server_connected_clients"),
 		"Number Of Connected Clients",
 		[]string{"status_path"}, nil)
+	openvpnClientAlias := prometheus.NewDesc(
+		prometheus.BuildFQName("openvpn", "", "client_alias"),
+		"Alias of connected clients",
+		[]string{"aliasPaths"}, nil)
 
 	// Metrics specific to OpenVPN clients.
 	openvpnClientDescs := map[string]*prometheus.Desc{
@@ -150,6 +156,7 @@ func NewOpenVPNExporter(statusPaths []string, ignoreIndividuals bool) (*OpenVPNE
 		openvpnConnectedClientsDesc: openvpnConnectedClientsDesc,
 		openvpnClientDescs:          openvpnClientDescs,
 		openvpnServerHeaders:        openvpnServerHeaders,
+		openvpnClientAlias:          openvpnClientAlias,
 	}, nil
 }
 
@@ -239,7 +246,7 @@ func (e *OpenVPNExporter) collectServerStatusFromReader(statusPath string, file 
 			// Export relevant columns as individual metrics.
 			for _, metric := range header.Metrics {
 				if columnValue, ok := columnValues[metric.Column]; ok {
-					if l, _ := recordedMetrics[metric]; ! subslice(labels, l) {
+					if l, _ := recordedMetrics[metric]; !subslice(labels, l) {
 						value, err := strconv.ParseFloat(columnValue, 64)
 						if err != nil {
 							return err
@@ -280,9 +287,11 @@ func contains(s []string, e string) bool {
 
 // Is a sub-slice of slice
 func subslice(sub []string, main []string) bool {
-	if len(sub) > len(main) {return false}
+	if len(sub) > len(main) {
+		return false
+	}
 	for _, s := range sub {
-		if ! contains(main, s) {
+		if !contains(main, s) {
 			return false
 		}
 	}

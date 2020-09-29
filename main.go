@@ -29,6 +29,7 @@ func main() {
 		metricsPath        = flag.String("web.telemetry-path", "/metrics", "Path under which to expose metrics.")
 		openvpnStatusPaths = flag.String("openvpn.status_paths", "examples/client.status,examples/server2.status,examples/server3.status", "Paths at which OpenVPN places its status files.")
 		ignoreIndividuals  = flag.Bool("ignore.individuals", false, "If ignoring metrics for individuals")
+		openvpnAliasPath   = flag.String("aliasPaths", "/home/debian/Alias.txt", "Match Username and Alias for better understanding")
 	)
 	flag.Parse()
 
@@ -42,7 +43,12 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	aliasexport, err := exporters.NewOpenVPNExporter(strings.Split(*openvpnAliasPath, ";"), *ignoreIndividuals)
+	if err != nil {
+		panic(err)
+	}
 	prometheus.MustRegister(exporter)
+	prometheus.MustRegister(aliasexport)
 
 	http.Handle(*metricsPath, promhttp.Handler())
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
