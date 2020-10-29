@@ -1,3 +1,5 @@
 openvpn_exporter
 .idea
 dist
+.vscode/
+.vscode\

@@ -4,14 +4,17 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"github.com/prometheus/client_golang/prometheus"
 	"io"
 	"log"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
+
+const timeFormat = "Mon Jan 02 15:04:05 2006"
 
 type OpenvpnServerHeader struct {
 	LabelColumns []string
@@ -159,7 +162,7 @@ func NewOpenVPNExporter(statusPaths []string, ignoreIndividuals bool) (*OpenVPNE
 // version 2 and 3 file formats.
 func (e *OpenVPNExporter) collectStatusFromReader(statusPath string, file io.Reader, ch chan<- prometheus.Metric) error {
 	reader := bufio.NewReader(file)
-	buf, _ := reader.Peek(18)
+	buf, _ := reader.Peek(20)
 	if bytes.HasPrefix(buf, []byte("TITLE,")) {
 		// Server statistics, using format version 2.
 		return e.collectServerStatusFromReader(statusPath, reader, ch, ",")
@@ -168,12 +171,66 @@ func (e *OpenVPNExporter) collectStatusFromReader(statusPath string, file io.Rea
 		// difference compared to version 2 is that it uses tabs
 		// instead of spaces.
 		return e.collectServerStatusFromReader(statusPath, reader, ch, "\t")
+	} else if bytes.HasPrefix(buf, []byte("OpenVPN CLIENT LIST")) {
+		// Ubuntu 20.20 Version 2.4.7
+		return e.collect247ServerStatusFromReader(statusPath, reader, ch)
 	} else if bytes.HasPrefix(buf, []byte("OpenVPN STATISTICS")) {
 		// Client statistics.
 		return e.collectClientStatusFromReader(statusPath, reader, ch)
 	} else {
 		return fmt.Errorf("unexpected file contents: %q", buf)
 	}
+}
+
+func (e *OpenVPNExporter) collect247ServerStatusFromReader(statusPath string, file io.Reader, ch chan<- prometheus.Metric) error {
+	scanner := bufio.NewScanner(file)
+	scanner.Split(bufio.ScanLines)
+	// counter of connected client
+	numberConnectedClient := 0
+	//headersFound := map[string][]string{}
+	// recordedMetrics := map[OpenvpnServerHeaderField][]string{}
+
+	for scanner.Scan() {
+		fields := strings.Split(scanner.Text(), ",")
+		if len(fields) == 5 {
+			// A Client line, if it not the header it will be processed
+			if fields[0] != "Common Name" {
+				numberConnectedClient++
+				// headers := e.openvpnServerHeaders["CLIENT_LIST"]
+			}
+			// else {
+			// 	heeaheadersFound[]
+			// }
+			continue
+		}
+		if len(fields) == 4 {
+			// A Routing Table line, if it not the header it will be processed
+			if fields[0] != "Virtual Address" {
+				// headers := e.openvpnServerHeaders["ROUTING_TABLE"]
+			}
+			continue
+		}
+		if fields[0] == "Updated" {
+			// Time at which the statistics were updated.
+			timeStartStats, err := time.Parse(timeFormat, fields[1])
+			if err != nil {
+				return err
+			}
+			ch <- prometheus.MustNewConstMetric(
+				e.openvpnStatusUpdateTimeDesc,
+				prometheus.GaugeValue,
+				float64(timeStartStats.Unix()),
+				statusPath)
+			continue
+		}
+	}
+	// add the number of connected client
+	ch <- prometheus.MustNewConstMetric(
+		e.openvpnConnectedClientsDesc,
+		prometheus.GaugeValue,
+		float64(numberConnectedClient),
+		statusPath)
+	return scanner.Err()
 }
 
 // Converts OpenVPN server status information into Prometheus metrics.
@@ -239,7 +296,7 @@ func (e *OpenVPNExporter) collectServerStatusFromReader(statusPath string, file 
 			// Export relevant columns as individual metrics.
 			for _, metric := range header.Metrics {
 				if columnValue, ok := columnValues[metric.Column]; ok {
-					if l, _ := recordedMetrics[metric]; ! subslice(labels, l) {
+					if l, _ := recordedMetrics[metric]; !subslice(labels, l) {
 						value, err := strconv.ParseFloat(columnValue, 64)
 						if err != nil {
 							return err
@@ -280,9 +337,11 @@ func contains(s []string, e string) bool {
 
 // Is a sub-slice of slice
 func subslice(sub []string, main []string) bool {
-	if len(sub) > len(main) {return false}
+	if len(sub) > len(main) {
+		return false
+	}
 	for _, s := range sub {
-		if ! contains(main, s) {
+		if !contains(main, s) {
 			return false
 		}
 	}
