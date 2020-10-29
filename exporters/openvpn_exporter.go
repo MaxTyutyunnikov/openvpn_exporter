@@ -34,6 +34,7 @@ type OpenVPNExporter struct {
 	openvpnConnectedClientsDesc *prometheus.Desc
 	openvpnClientDescs          map[string]*prometheus.Desc
 	openvpnServerHeaders        map[string]OpenvpnServerHeader
+	openvpnServer247Headers     map[string]OpenvpnServerHeader
 }
 
 func NewOpenVPNExporter(statusPaths []string, ignoreIndividuals bool) (*OpenVPNExporter, error) {
@@ -95,6 +96,7 @@ func NewOpenVPNExporter(statusPaths []string, ignoreIndividuals bool) (*OpenVPNE
 
 	var serverHeaderClientLabels []string
 	var serverHeaderClientLabelColumns []string
+	var serverHeader247ClientLabelColumns []string
 	var serverHeaderRoutingLabels []string
 	var serverHeaderRoutingLabelColumns []string
 	if ignoreIndividuals {
@@ -105,6 +107,7 @@ func NewOpenVPNExporter(statusPaths []string, ignoreIndividuals bool) (*OpenVPNE
 	} else {
 		serverHeaderClientLabels = []string{"status_path", "common_name", "connection_time", "real_address", "virtual_address", "username"}
 		serverHeaderClientLabelColumns = []string{"Common Name", "Connected Since (time_t)", "Real Address", "Virtual Address", "Username"}
+		serverHeader247ClientLabelColumns = []string{"Common Name", "Real Address", "Connected Since"}
 		serverHeaderRoutingLabels = []string{"status_path", "common_name", "real_address", "virtual_address"}
 		serverHeaderRoutingLabelColumns = []string{"Common Name", "Real Address", "Virtual Address"}
 	}
@@ -146,6 +149,43 @@ func NewOpenVPNExporter(statusPaths []string, ignoreIndividuals bool) (*OpenVPNE
 		},
 	}
 
+	openvpnServer247Headers := map[string]OpenvpnServerHeader{
+		"CLIENT_LIST": {
+			LabelColumns: serverHeader247ClientLabelColumns,
+			Metrics: []OpenvpnServerHeaderField{
+				{
+					Column: "Bytes Received",
+					Desc: prometheus.NewDesc(
+						prometheus.BuildFQName("openvpn", "server", "client_received_bytes_total"),
+						"Amount of data received over a connection on the VPN server, in bytes.",
+						serverHeaderClientLabels, nil),
+					ValueType: prometheus.CounterValue,
+				},
+				{
+					Column: "Bytes Sent",
+					Desc: prometheus.NewDesc(
+						prometheus.BuildFQName("openvpn", "server", "client_sent_bytes_total"),
+						"Amount of data sent over a connection on the VPN server, in bytes.",
+						serverHeaderClientLabels, nil),
+					ValueType: prometheus.CounterValue,
+				},
+			},
+		},
+		"ROUTING_TABLE": {
+			LabelColumns: serverHeaderRoutingLabelColumns,
+			Metrics: []OpenvpnServerHeaderField{
+				{
+					Column: "Last Ref (time_t)",
+					Desc: prometheus.NewDesc(
+						prometheus.BuildFQName("openvpn", "server", "route_last_reference_time_seconds"),
+						"Time at which a route was last referenced, in seconds.",
+						serverHeaderRoutingLabels, nil),
+					ValueType: prometheus.GaugeValue,
+				},
+			},
+		},
+	}
+
 	return &OpenVPNExporter{
 		statusPaths:                 statusPaths,
 		openvpnUpDesc:               openvpnUpDesc,
@@ -153,6 +193,7 @@ func NewOpenVPNExporter(statusPaths []string, ignoreIndividuals bool) (*OpenVPNE
 		openvpnConnectedClientsDesc: openvpnConnectedClientsDesc,
 		openvpnClientDescs:          openvpnClientDescs,
 		openvpnServerHeaders:        openvpnServerHeaders,
+		openvpnServer247Headers:     openvpnServer247Headers,
 	}, nil
 }
 
@@ -187,8 +228,8 @@ func (e *OpenVPNExporter) collect247ServerStatusFromReader(statusPath string, fi
 	scanner.Split(bufio.ScanLines)
 	// counter of connected client
 	numberConnectedClient := 0
-	//headersFound := map[string][]string{}
-	// recordedMetrics := map[OpenvpnServerHeaderField][]string{}
+	headersFound := map[string][]string{}
+	recordedMetrics := map[OpenvpnServerHeaderField][]string{}
 
 	for scanner.Scan() {
 		fields := strings.Split(scanner.Text(), ",")
@@ -196,17 +237,42 @@ func (e *OpenVPNExporter) collect247ServerStatusFromReader(statusPath string, fi
 			// A Client line, if it not the header it will be processed
 			if fields[0] != "Common Name" {
 				numberConnectedClient++
-				// headers := e.openvpnServerHeaders["CLIENT_LIST"]
+				header := e.openvpnServer247Headers["CLIENT_LIST"]
+				columnNames, ok := headersFound["CLIENT_LIST"]
+				if !ok {
+					return fmt.Errorf("%s should be preceded after the HEADERS", fields[0])
+				}
+				if len(fields) > len(columnNames) {
+					return fmt.Errorf("HEADER for %s describes a different number of columns", fields[0])
+				}
+
+				// Store entry values in a map indexed by column name.
+				columnValues := map[string]string{}
+				for _, column := range header.LabelColumns {
+					columnValues[column] = ""
+				}
+				for i, column := range columnNames {
+					columnValues[column] = fields[i]
+				}
+				// Extract columns that should act as entry labels.
+				labels := []string{statusPath}
+				for _, column := range header.LabelColumns {
+					labels = append(labels, columnValues[column])
+				}
+
+				continue
+			} else {
+				headersFound["CLIENT_LIST"] = fields
 			}
-			// else {
-			// 	heeaheadersFound[]
-			// }
 			continue
 		}
 		if len(fields) == 4 {
 			// A Routing Table line, if it not the header it will be processed
 			if fields[0] != "Virtual Address" {
 				// headers := e.openvpnServerHeaders["ROUTING_TABLE"]
+
+			} else {
+				headersFound["ROUTING_TABLE"] = fields
 			}
 			continue
 		}
