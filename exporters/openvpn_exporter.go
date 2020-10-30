@@ -112,7 +112,7 @@ func NewOpenVPNExporter(statusPaths []string, ignoreIndividuals bool) (*OpenVPNE
 		serverHeaderRoutingLabelColumns = []string{"Common Name"}
 	} else {
 		serverHeaderClientLabels = []string{"status_path", "common_name", "connection_time", "real_address", "virtual_address", "username"}
-		serverHeader247ClientLabels = []string{"status_path", "common_name", "connection_time", "real_address"}
+		serverHeader247ClientLabels = []string{"status_path", "common_name", "real_address", "connection_time"}
 		serverHeaderClientLabelColumns = []string{"Common Name", "Connected Since (time_t)", "Real Address", "Virtual Address", "Username"}
 		serverHeader247ClientLabelColumns = []string{"Common Name", "Real Address", "Connected Since"}
 		serverHeaderRoutingLabels = []string{"status_path", "common_name", "real_address", "virtual_address"}
