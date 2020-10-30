@@ -32,6 +32,7 @@ type OpenVPNExporter struct {
 	openvpnUpDesc               *prometheus.Desc
 	openvpnStatusUpdateTimeDesc *prometheus.Desc
 	openvpnConnectedClientsDesc *prometheus.Desc
+	openvpnMaxQueueLenghtDesc   *prometheus.Desc
 	openvpnClientDescs          map[string]*prometheus.Desc
 	openvpnServerHeaders        map[string]OpenvpnServerHeader
 	openvpnServer247Headers     map[string]OpenvpnServerHeader
@@ -52,6 +53,10 @@ func NewOpenVPNExporter(statusPaths []string, ignoreIndividuals bool) (*OpenVPNE
 	openvpnConnectedClientsDesc := prometheus.NewDesc(
 		prometheus.BuildFQName("openvpn", "", "server_connected_clients"),
 		"Number Of Connected Clients",
+		[]string{"status_path"}, nil)
+	openvpnMaxQueueLenghtDesc := prometheus.NewDesc(
+		prometheus.BuildFQName("openvpn", "", "server_max_queue_length"),
+		"Max queue length",
 		[]string{"status_path"}, nil)
 
 	// Metrics specific to OpenVPN clients.
@@ -95,6 +100,7 @@ func NewOpenVPNExporter(statusPaths []string, ignoreIndividuals bool) (*OpenVPNE
 	}
 
 	var serverHeaderClientLabels []string
+	var serverHeader247ClientLabels []string
 	var serverHeaderClientLabelColumns []string
 	var serverHeader247ClientLabelColumns []string
 	var serverHeaderRoutingLabels []string
@@ -106,6 +112,7 @@ func NewOpenVPNExporter(statusPaths []string, ignoreIndividuals bool) (*OpenVPNE
 		serverHeaderRoutingLabelColumns = []string{"Common Name"}
 	} else {
 		serverHeaderClientLabels = []string{"status_path", "common_name", "connection_time", "real_address", "virtual_address", "username"}
+		serverHeader247ClientLabels = []string{"status_path", "common_name", "connection_time", "real_address"}
 		serverHeaderClientLabelColumns = []string{"Common Name", "Connected Since (time_t)", "Real Address", "Virtual Address", "Username"}
 		serverHeader247ClientLabelColumns = []string{"Common Name", "Real Address", "Connected Since"}
 		serverHeaderRoutingLabels = []string{"status_path", "common_name", "real_address", "virtual_address"}
@@ -158,7 +165,7 @@ func NewOpenVPNExporter(statusPaths []string, ignoreIndividuals bool) (*OpenVPNE
 					Desc: prometheus.NewDesc(
 						prometheus.BuildFQName("openvpn", "server", "client_received_bytes_total"),
 						"Amount of data received over a connection on the VPN server, in bytes.",
-						serverHeaderClientLabels, nil),
+						serverHeader247ClientLabels, nil),
 					ValueType: prometheus.CounterValue,
 				},
 				{
@@ -166,7 +173,7 @@ func NewOpenVPNExporter(statusPaths []string, ignoreIndividuals bool) (*OpenVPNE
 					Desc: prometheus.NewDesc(
 						prometheus.BuildFQName("openvpn", "server", "client_sent_bytes_total"),
 						"Amount of data sent over a connection on the VPN server, in bytes.",
-						serverHeaderClientLabels, nil),
+						serverHeader247ClientLabels, nil),
 					ValueType: prometheus.CounterValue,
 				},
 			},
@@ -175,7 +182,7 @@ func NewOpenVPNExporter(statusPaths []string, ignoreIndividuals bool) (*OpenVPNE
 			LabelColumns: serverHeaderRoutingLabelColumns,
 			Metrics: []OpenvpnServerHeaderField{
 				{
-					Column: "Last Ref (time_t)",
+					Column: "Last Ref",
 					Desc: prometheus.NewDesc(
 						prometheus.BuildFQName("openvpn", "server", "route_last_reference_time_seconds"),
 						"Time at which a route was last referenced, in seconds.",
@@ -191,6 +198,7 @@ func NewOpenVPNExporter(statusPaths []string, ignoreIndividuals bool) (*OpenVPNE
 		openvpnUpDesc:               openvpnUpDesc,
 		openvpnStatusUpdateTimeDesc: openvpnStatusUpdateTimeDesc,
 		openvpnConnectedClientsDesc: openvpnConnectedClientsDesc,
+		openvpnMaxQueueLenghtDesc:   openvpnMaxQueueLenghtDesc,
 		openvpnClientDescs:          openvpnClientDescs,
 		openvpnServerHeaders:        openvpnServerHeaders,
 		openvpnServer247Headers:     openvpnServer247Headers,
@@ -237,46 +245,29 @@ func (e *OpenVPNExporter) collect247ServerStatusFromReader(statusPath string, fi
 			// A Client line, if it not the header it will be processed
 			if fields[0] != "Common Name" {
 				numberConnectedClient++
-				header := e.openvpnServer247Headers["CLIENT_LIST"]
-				columnNames, ok := headersFound["CLIENT_LIST"]
-				if !ok {
-					return fmt.Errorf("%s should be preceded after the HEADERS", fields[0])
+				dublicate, err := export247Metrics(e, "CLIENT_LIST", headersFound, fields, recordedMetrics, statusPath, ch)
+				if err != nil {
+					return err
 				}
-				if len(fields) > len(columnNames) {
-					return fmt.Errorf("HEADER for %s describes a different number of columns", fields[0])
+				if dublicate {
+					numberConnectedClient--
 				}
-
-				// Store entry values in a map indexed by column name.
-				columnValues := map[string]string{}
-				for _, column := range header.LabelColumns {
-					columnValues[column] = ""
-				}
-				for i, column := range columnNames {
-					columnValues[column] = fields[i]
-				}
-				// Extract columns that should act as entry labels.
-				labels := []string{statusPath}
-				for _, column := range header.LabelColumns {
-					labels = append(labels, columnValues[column])
-				}
-
-				continue
 			} else {
 				headersFound["CLIENT_LIST"] = fields
 			}
-			continue
-		}
-		if len(fields) == 4 {
+
+		} else if len(fields) == 4 {
 			// A Routing Table line, if it not the header it will be processed
 			if fields[0] != "Virtual Address" {
-				// headers := e.openvpnServerHeaders["ROUTING_TABLE"]
-
+				_, err := export247Metrics(e, "ROUTING_TABLE", headersFound, fields, recordedMetrics, statusPath, ch)
+				if err != nil {
+					return err
+				}
 			} else {
 				headersFound["ROUTING_TABLE"] = fields
 			}
-			continue
-		}
-		if fields[0] == "Updated" {
+
+		} else if fields[0] == "Updated" {
 			// Time at which the statistics were updated.
 			timeStartStats, err := time.Parse(timeFormat, fields[1])
 			if err != nil {
@@ -287,8 +278,19 @@ func (e *OpenVPNExporter) collect247ServerStatusFromReader(statusPath string, fi
 				prometheus.GaugeValue,
 				float64(timeStartStats.Unix()),
 				statusPath)
-			continue
+
+		} else if fields[0] == "Max bcast/mcast queue length" {
+			queueLength, err := strconv.ParseFloat(fields[1], 64)
+			if err != nil {
+				return err
+			}
+			ch <- prometheus.MustNewConstMetric(
+				e.openvpnMaxQueueLenghtDesc,
+				prometheus.GaugeValue,
+				queueLength,
+				statusPath)
 		}
+
 	}
 	// add the number of connected client
 	ch <- prometheus.MustNewConstMetric(
@@ -297,6 +299,70 @@ func (e *OpenVPNExporter) collect247ServerStatusFromReader(statusPath string, fi
 		float64(numberConnectedClient),
 		statusPath)
 	return scanner.Err()
+}
+
+func export247Metrics(e *OpenVPNExporter, tableName string, headersFound map[string][]string, fields []string, recordedMetrics map[OpenvpnServerHeaderField][]string, statusPath string, ch chan<- prometheus.Metric) (bool, error) {
+	header := e.openvpnServer247Headers[tableName]
+	columnNames, ok := headersFound[tableName]
+	dublicate := false
+	if !ok {
+		return false, fmt.Errorf("%s should be preceded after the HEADERS", fields[0])
+	}
+	if len(fields) > len(columnNames) {
+		return false, fmt.Errorf("HEADER for %s describes a different number of columns", fields[0])
+	}
+
+	// Store entry values in a map indexed by column name.
+	columnValues := map[string]string{}
+	for _, column := range header.LabelColumns {
+		columnValues[column] = ""
+	}
+	for i, column := range columnNames {
+		columnValues[column] = fields[i]
+	}
+	// Extract columns that should act as entry labels.
+	labels := []string{statusPath}
+	for _, column := range header.LabelColumns {
+		labels = append(labels, columnValues[column])
+	}
+	// Export relevant columns as individual metrics.
+	for _, metric := range header.Metrics {
+		if columnValue, ok := columnValues[metric.Column]; ok {
+			if l, _ := recordedMetrics[metric]; !subslice(labels, l) {
+				value, err := convertValue(columnValue)
+				if err != nil {
+					return false, err
+				}
+				ch <- prometheus.MustNewConstMetric(
+					metric.Desc,
+					metric.ValueType,
+					value,
+					labels...)
+				recordedMetrics[metric] = append(recordedMetrics[metric], labels...)
+			} else {
+				dublicate = true
+				log.Printf("Metric entry with same labels: %s, %s", metric.Column, labels)
+			}
+		}
+	}
+
+	return dublicate, nil
+}
+
+func convertValue(value string) (float64, error) {
+	var err error
+	var timeValue time.Time
+	var floatValue float64
+	timeValue, err = time.Parse(timeFormat, value)
+	if err == nil {
+		return float64(timeValue.Unix()), nil
+	}
+	floatValue, err = strconv.ParseFloat(value, 64)
+	if err == nil {
+		return floatValue, nil
+	}
+
+	return 0.0, err
 }
 
 // Converts OpenVPN server status information into Prometheus metrics.
