@@ -14,7 +14,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-const timeFormat = "Mon Jan 02 15:04:05 2006"
+const timeFormat = "Mon Jan  2 15:04:05 2006"
 
 type OpenvpnServerHeader struct {
 	LabelColumns []string
@@ -353,13 +353,14 @@ func convertValue(value string) (float64, error) {
 	var err error
 	var timeValue time.Time
 	var floatValue float64
-	timeValue, err = time.Parse(timeFormat, value)
-	if err == nil {
-		return float64(timeValue.Unix()), nil
-	}
+
 	floatValue, err = strconv.ParseFloat(value, 64)
 	if err == nil {
 		return floatValue, nil
+	}
+	timeValue, err = time.Parse(timeFormat, value)
+	if err == nil {
+		return float64(timeValue.Unix()), nil
 	}
 
 	return 0.0, err
