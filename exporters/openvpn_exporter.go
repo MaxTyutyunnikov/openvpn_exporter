@@ -4,54 +4,59 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"github.com/prometheus/client_golang/prometheus"
 	"io"
 	"log"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
 
-type OpenvpnServerHeader struct {
+// OpenVPNServerHeader is the OpenVPN server headers
+type OpenVPNServerHeader struct {
 	LabelColumns []string
-	Metrics      []OpenvpnServerHeaderField
+	Metrics      []OpenVPNServerHeaderField
 }
 
-type OpenvpnServerHeaderField struct {
+// OpenVPNServerHeaderField is an individual server header
+type OpenVPNServerHeaderField struct {
 	Column    string
 	Desc      *prometheus.Desc
 	ValueType prometheus.ValueType
 }
 
+// OpenVPNExporter is the metrics exported
 type OpenVPNExporter struct {
-	statusPaths                 []string
-	openvpnUpDesc               *prometheus.Desc
-	openvpnStatusUpdateTimeDesc *prometheus.Desc
-	openvpnConnectedClientsDesc *prometheus.Desc
-	openvpnClientDescs          map[string]*prometheus.Desc
-	openvpnServerHeaders        map[string]OpenvpnServerHeader
+	statusPaths          []string
+	upDesc               *prometheus.Desc
+	statusUpdateTimeDesc *prometheus.Desc
+	connectedClientsDesc *prometheus.Desc
+	clientDescs          map[string]*prometheus.Desc
+	serverHeaders        map[string]OpenVPNServerHeader
 }
 
+// NewOpenVPNExporter creates the exporter for client and server statistics metrics.
 func NewOpenVPNExporter(statusPaths []string, ignoreIndividuals bool) (*OpenVPNExporter, error) {
 	// Metrics exported both for client and server statistics.
-	openvpnUpDesc := prometheus.NewDesc(
+	upDesc := prometheus.NewDesc(
 		prometheus.BuildFQName("openvpn", "", "up"),
 		"Whether scraping OpenVPN's metrics was successful.",
 		[]string{"status_path"}, nil)
-	openvpnStatusUpdateTimeDesc := prometheus.NewDesc(
+	statusUpdateTimeDesc := prometheus.NewDesc(
 		prometheus.BuildFQName("openvpn", "", "status_update_time_seconds"),
 		"UNIX timestamp at which the OpenVPN statistics were updated.",
 		[]string{"status_path"}, nil)
 
 	// Metrics specific to OpenVPN servers.
-	openvpnConnectedClientsDesc := prometheus.NewDesc(
+	connectedClientsDesc := prometheus.NewDesc(
 		prometheus.BuildFQName("openvpn", "", "server_connected_clients"),
 		"Number Of Connected Clients",
 		[]string{"status_path"}, nil)
 
 	// Metrics specific to OpenVPN clients.
-	openvpnClientDescs := map[string]*prometheus.Desc{
+	clientDescs := map[string]*prometheus.Desc{
 		"TUN/TAP read bytes": prometheus.NewDesc(
 			prometheus.BuildFQName("openvpn", "client", "tun_tap_read_bytes_total"),
 			"Total amount of TUN/TAP traffic read, in bytes.",
@@ -106,10 +111,10 @@ func NewOpenVPNExporter(statusPaths []string, ignoreIndividuals bool) (*OpenVPNE
 		serverHeaderRoutingLabelColumns = []string{"Common Name", "Real Address", "Virtual Address"}
 	}
 
-	openvpnServerHeaders := map[string]OpenvpnServerHeader{
+	serverHeaders := map[string]OpenVPNServerHeader{
 		"CLIENT_LIST": {
 			LabelColumns: serverHeaderClientLabelColumns,
-			Metrics: []OpenvpnServerHeaderField{
+			Metrics: []OpenVPNServerHeaderField{
 				{
 					Column: "Bytes Received",
 					Desc: prometheus.NewDesc(
@@ -130,7 +135,7 @@ func NewOpenVPNExporter(statusPaths []string, ignoreIndividuals bool) (*OpenVPNE
 		},
 		"ROUTING_TABLE": {
 			LabelColumns: serverHeaderRoutingLabelColumns,
-			Metrics: []OpenvpnServerHeaderField{
+			Metrics: []OpenVPNServerHeaderField{
 				{
 					Column: "Last Ref (time_t)",
 					Desc: prometheus.NewDesc(
@@ -144,12 +149,12 @@ func NewOpenVPNExporter(statusPaths []string, ignoreIndividuals bool) (*OpenVPNE
 	}
 
 	return &OpenVPNExporter{
-		statusPaths:                 statusPaths,
-		openvpnUpDesc:               openvpnUpDesc,
-		openvpnStatusUpdateTimeDesc: openvpnStatusUpdateTimeDesc,
-		openvpnConnectedClientsDesc: openvpnConnectedClientsDesc,
-		openvpnClientDescs:          openvpnClientDescs,
-		openvpnServerHeaders:        openvpnServerHeaders,
+		statusPaths:          statusPaths,
+		upDesc:               upDesc,
+		statusUpdateTimeDesc: statusUpdateTimeDesc,
+		connectedClientsDesc: connectedClientsDesc,
+		clientDescs:          clientDescs,
+		serverHeaders:        serverHeaders,
 	}, nil
 }
 
@@ -184,7 +189,7 @@ func (e *OpenVPNExporter) collectServerStatusFromReader(statusPath string, file 
 	// counter of connected client
 	numberConnectedClient := 0
 
-	recordedMetrics := map[OpenvpnServerHeaderField][]string{}
+	recordedMetrics := map[OpenVPNServerHeaderField][]string{}
 
 	for scanner.Scan() {
 		fields := strings.Split(scanner.Text(), separator)
@@ -202,13 +207,13 @@ func (e *OpenVPNExporter) collectServerStatusFromReader(statusPath string, file 
 				return err
 			}
 			ch <- prometheus.MustNewConstMetric(
-				e.openvpnStatusUpdateTimeDesc,
+				e.statusUpdateTimeDesc,
 				prometheus.GaugeValue,
 				timeStartStats,
 				statusPath)
 		} else if fields[0] == "TITLE" && len(fields) == 2 {
 			// OpenVPN version number.
-		} else if header, ok := e.openvpnServerHeaders[fields[0]]; ok {
+		} else if header, ok := e.serverHeaders[fields[0]]; ok {
 			if fields[0] == "CLIENT_LIST" {
 				numberConnectedClient++
 			}
@@ -239,7 +244,7 @@ func (e *OpenVPNExporter) collectServerStatusFromReader(statusPath string, file 
 			// Export relevant columns as individual metrics.
 			for _, metric := range header.Metrics {
 				if columnValue, ok := columnValues[metric.Column]; ok {
-					if l, _ := recordedMetrics[metric]; ! subslice(labels, l) {
+					if l := recordedMetrics[metric]; !subslice(labels, l) {
 						value, err := strconv.ParseFloat(columnValue, 64)
 						if err != nil {
 							return err
@@ -261,7 +266,7 @@ func (e *OpenVPNExporter) collectServerStatusFromReader(statusPath string, file 
 	}
 	// add the number of connected client
 	ch <- prometheus.MustNewConstMetric(
-		e.openvpnConnectedClientsDesc,
+		e.connectedClientsDesc,
 		prometheus.GaugeValue,
 		float64(numberConnectedClient),
 		statusPath)
@@ -280,9 +285,11 @@ func contains(s []string, e string) bool {
 
 // Is a sub-slice of slice
 func subslice(sub []string, main []string) bool {
-	if len(sub) > len(main) {return false}
+	if len(sub) > len(main) {
+		return false
+	}
 	for _, s := range sub {
-		if ! contains(main, s) {
+		if !contains(main, s) {
 			return false
 		}
 	}
@@ -307,11 +314,11 @@ func (e *OpenVPNExporter) collectClientStatusFromReader(statusPath string, file 
 				return err
 			}
 			ch <- prometheus.MustNewConstMetric(
-				e.openvpnStatusUpdateTimeDesc,
+				e.statusUpdateTimeDesc,
 				prometheus.GaugeValue,
 				float64(timeParser.Unix()),
 				statusPath)
-		} else if desc, ok := e.openvpnClientDescs[fields[0]]; ok && len(fields) == 2 {
+		} else if desc, ok := e.clientDescs[fields[0]]; ok && len(fields) == 2 {
 			// Traffic counters.
 			value, err := strconv.ParseFloat(fields[1], 64)
 			if err != nil {
@@ -329,32 +336,35 @@ func (e *OpenVPNExporter) collectClientStatusFromReader(statusPath string, file 
 	return scanner.Err()
 }
 
+// collectStatusFromFile will collect the status of OpenVPN from the status file
 func (e *OpenVPNExporter) collectStatusFromFile(statusPath string, ch chan<- prometheus.Metric) error {
 	conn, err := os.Open(statusPath)
-	defer conn.Close()
 	if err != nil {
 		return err
 	}
+	defer conn.Close()
 	return e.collectStatusFromReader(statusPath, conn, ch)
 }
 
+// Describe will send upDesc of the OpenVPNExporter to ch
 func (e *OpenVPNExporter) Describe(ch chan<- *prometheus.Desc) {
-	ch <- e.openvpnUpDesc
+	ch <- e.upDesc
 }
 
+// Collect will collect the metrics
 func (e *OpenVPNExporter) Collect(ch chan<- prometheus.Metric) {
 	for _, statusPath := range e.statusPaths {
 		err := e.collectStatusFromFile(statusPath, ch)
 		if err == nil {
 			ch <- prometheus.MustNewConstMetric(
-				e.openvpnUpDesc,
+				e.upDesc,
 				prometheus.GaugeValue,
 				1.0,
 				statusPath)
 		} else {
 			log.Printf("Failed to scrape showq socket: %s", err)
 			ch <- prometheus.MustNewConstMetric(
-				e.openvpnUpDesc,
+				e.upDesc,
 				prometheus.GaugeValue,
 				0.0,
 				statusPath)
