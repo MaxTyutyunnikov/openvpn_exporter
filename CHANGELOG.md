@@ -1,3 +1,7 @@
+## 0.3.1 / 2021-10-06
+
+* [BUGFIX] Handle OpenVPN client 2.4 dates
+
 ## 0.2.1 / 2018-04-06
 
 * [BUGFIX] CLIENT_LIST metrics collect fixed.

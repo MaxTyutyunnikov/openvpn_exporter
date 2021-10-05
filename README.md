@@ -1,8 +1,5 @@
 # Prometheus OpenVPN exporter
 
-**Please note:** This repository is currently unmaintained. Due to insufficient time and not using the exporter anymore
-we decided to archive this project.
-
 ---
 
 This repository provides code for a simple Prometheus metrics exporter
@@ -86,7 +83,7 @@ To use with docker you must mount your status file to `/etc/openvpn_exporter/ser
 ```sh
 docker run -p 9176:9176 \
   -v /path/to/openvpn_server.status:/etc/openvpn_exporter/server.status \
-  kumina/openvpn-exporter -openvpn.status_paths /etc/openvpn_exporter/server.status
+  splack/openvpn-exporter -openvpn.status_paths /etc/openvpn_exporter/server.status
 ```
 
 Metrics should be available at http://localhost:9176/metrics.
@@ -94,4 +91,4 @@ Metrics should be available at http://localhost:9176/metrics.
 ## Get a standalone executable binary
 
 You can download the pre-compiled binaries from the
-[releases page](https://github.com/kumina/openvpn_exporter/releases).
+[releases page](https://github.com/splack/openvpn_exporter/releases).
