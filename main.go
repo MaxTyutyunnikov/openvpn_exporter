@@ -15,7 +15,7 @@ package main
 
 import (
 	"flag"
-	"github.com/kumina/openvpn_exporter/exporters"
+	"github.com/dadowl/openvpn_exporter/exporters"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"log"
@@ -27,18 +27,20 @@ func main() {
 	var (
 		listenAddress      = flag.String("web.listen-address", ":9176", "Address to listen on for web interface and telemetry.")
 		metricsPath        = flag.String("web.telemetry-path", "/metrics", "Path under which to expose metrics.")
-		openvpnStatusPaths = flag.String("openvpn.status_paths", "examples/client.status,examples/server2.status,examples/server3.status", "Paths at which OpenVPN places its status files.")
+		openvpnStatusPaths = flag.String("openvpn.status_paths", "/var/log/openvpn/openvpn-status.log", "Paths at which OpenVPN places its status files.")
 		ignoreIndividuals  = flag.Bool("ignore.individuals", false, "If ignoring metrics for individuals")
+		openvpnName        = flag.String("openvpn.name", "vpn", "Vpn name for Grafana GeoIP map")
 	)
 	flag.Parse()
 
 	log.Printf("Starting OpenVPN Exporter\n")
+	log.Printf("VPN name: %v\n", *openvpnName)
 	log.Printf("Listen address: %v\n", *listenAddress)
 	log.Printf("Metrics path: %v\n", *metricsPath)
 	log.Printf("openvpn.status_path: %v\n", *openvpnStatusPaths)
 	log.Printf("Ignore Individuals: %v\n", *ignoreIndividuals)
 
-	exporter, err := exporters.NewOpenVPNExporter(strings.Split(*openvpnStatusPaths, ","), *ignoreIndividuals)
+	exporter, err := exporters.NewOpenVPNExporter(strings.Split(*openvpnStatusPaths, ","), *ignoreIndividuals, *openvpnName)
 	if err != nil {
 		panic(err)
 	}

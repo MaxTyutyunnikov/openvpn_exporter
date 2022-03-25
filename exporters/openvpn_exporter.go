@@ -3,10 +3,13 @@ package exporters
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"github.com/prometheus/client_golang/prometheus"
 	"io"
+	"io/ioutil"
 	"log"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -31,9 +34,15 @@ type OpenVPNExporter struct {
 	openvpnConnectedClientsDesc *prometheus.Desc
 	openvpnClientDescs          map[string]*prometheus.Desc
 	openvpnServerHeaders        map[string]OpenvpnServerHeader
+	openvpnName                 string
 }
 
-func NewOpenVPNExporter(statusPaths []string, ignoreIndividuals bool) (*OpenVPNExporter, error) {
+type FullResponse struct {
+	Status    string `json:"status"`
+	Message   string `json:"message"`
+}
+
+func NewOpenVPNExporter(statusPaths []string, ignoreIndividuals bool, openvpnName string) (*OpenVPNExporter, error) {
 	// Metrics exported both for client and server statistics.
 	openvpnUpDesc := prometheus.NewDesc(
 		prometheus.BuildFQName("openvpn", "", "up"),
@@ -150,6 +159,7 @@ func NewOpenVPNExporter(statusPaths []string, ignoreIndividuals bool) (*OpenVPNE
 		openvpnConnectedClientsDesc: openvpnConnectedClientsDesc,
 		openvpnClientDescs:          openvpnClientDescs,
 		openvpnServerHeaders:        openvpnServerHeaders,
+		openvpnName:                 openvpnName,
 	}, nil
 }
 
@@ -236,7 +246,12 @@ func (e *OpenVPNExporter) collectServerStatusFromReader(statusPath string, file 
 				labels = append(labels, columnValues[column])
 			}
 
-			// Export relevant columns as individual metrics.
+			saveLocation(
+				columnValues["Common Name"],
+				strings.Split(columnValues["Real Address"], ":")[0],
+				columnValues["Virtual Address"],
+				e.openvpnName)
+
 			for _, metric := range header.Metrics {
 				if columnValue, ok := columnValues[metric.Column]; ok {
 					if l, _ := recordedMetrics[metric]; ! subslice(labels, l) {
@@ -360,4 +375,31 @@ func (e *OpenVPNExporter) Collect(ch chan<- prometheus.Metric) {
 				statusPath)
 		}
 	}
+}
+
+func saveLocation(commonName string, realAddress string, virtualAddress string, openvpnName string) FullResponse {
+	var result FullResponse
+	url := "http://10.8.0.11:8000/save-data?vpn_name="+openvpnName+"&ip="+realAddress+"&local_ip="+virtualAddress
+	resp, err := http.Get(url)
+	if err != nil {
+		fmt.Println("No response from request")
+	}
+
+	defer resp.Body.Close()
+	body, err := ioutil.ReadAll(resp.Body)
+
+	if err = json.Unmarshal(body, &result);err != nil {
+		//fmt.Println("Can not unmarshal JSON")
+	}
+
+	if result.Status == "error" {
+		log.Printf("Error! Message = "+result.Message)
+	}
+
+	return result
+}
+
+func PrettyPrint(i interface{}) string {
+	s, _ := json.MarshalIndent(i, "", "\t")
+	return string(s)
 }
