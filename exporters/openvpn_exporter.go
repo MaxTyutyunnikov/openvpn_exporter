@@ -248,7 +248,7 @@ func (e *OpenVPNExporter) collectServerStatusFromReader(statusPath string, file 
 
 			saveLocation(
 				columnValues["Common Name"],
-				strings.Split(columnValues["Real Address"], ":")[0],
+				columnValues["Real Address"],
 				columnValues["Virtual Address"],
 				e.openvpnName)
 
