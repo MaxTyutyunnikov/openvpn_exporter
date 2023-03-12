@@ -15,6 +15,7 @@ import (
 )
 
 const timeFormat = "Mon Jan  2 15:04:05 2006"
+const altTimeFormat = "2006-01-02 15:04:05"
 
 type OpenvpnServerHeader struct {
 	LabelColumns []string
@@ -271,7 +272,10 @@ func (e *OpenVPNExporter) collect247ServerStatusFromReader(statusPath string, fi
 			// Time at which the statistics were updated.
 			timeStartStats, err := time.Parse(timeFormat, fields[1])
 			if err != nil {
-				return err
+				timeStartStats, err = time.Parse(altTimeFormat, fields[1])
+				if err != nil {
+					return err
+				}
 			}
 			ch <- prometheus.MustNewConstMetric(
 				e.openvpnStatusUpdateTimeDesc,
@@ -359,6 +363,10 @@ func convertValue(value string) (float64, error) {
 		return floatValue, nil
 	}
 	timeValue, err = time.Parse(timeFormat, value)
+	if err == nil {
+		return float64(timeValue.Unix()), nil
+	}
+	timeValue, err = time.Parse(altTimeFormat, value)
 	if err == nil {
 		return float64(timeValue.Unix()), nil
 	}
