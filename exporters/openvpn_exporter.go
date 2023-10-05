@@ -4,13 +4,14 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"github.com/prometheus/client_golang/prometheus"
 	"io"
 	"log"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 type OpenvpnServerHeader struct {
@@ -239,7 +240,7 @@ func (e *OpenVPNExporter) collectServerStatusFromReader(statusPath string, file 
 			// Export relevant columns as individual metrics.
 			for _, metric := range header.Metrics {
 				if columnValue, ok := columnValues[metric.Column]; ok {
-					if l, _ := recordedMetrics[metric]; ! subslice(labels, l) {
+					if l, _ := recordedMetrics[metric]; !subslice(labels, l) {
 						value, err := strconv.ParseFloat(columnValue, 64)
 						if err != nil {
 							return err
@@ -280,9 +281,11 @@ func contains(s []string, e string) bool {
 
 // Is a sub-slice of slice
 func subslice(sub []string, main []string) bool {
-	if len(sub) > len(main) {return false}
+	if len(sub) > len(main) {
+		return false
+	}
 	for _, s := range sub {
-		if ! contains(main, s) {
+		if !contains(main, s) {
 			return false
 		}
 	}
@@ -295,46 +298,70 @@ func (e *OpenVPNExporter) collectClientStatusFromReader(statusPath string, file 
 	scanner.Split(bufio.ScanLines)
 	for scanner.Scan() {
 		fields := strings.Split(scanner.Text(), ",")
-		if fields[0] == "END" && len(fields) == 1 {
-			// Stats footer.
-		} else if fields[0] == "OpenVPN STATISTICS" && len(fields) == 1 {
-			// Stats header.
-		} else if fields[0] == "Updated" && len(fields) == 2 {
-			// Time at which the statistics were updated.
-			location, _ := time.LoadLocation("Local")
-			timeParser, err := time.ParseInLocation("Mon Jan 2 15:04:05 2006", fields[1], location)
-			if err != nil {
-				return err
-			}
-			ch <- prometheus.MustNewConstMetric(
-				e.openvpnStatusUpdateTimeDesc,
-				prometheus.GaugeValue,
-				float64(timeParser.Unix()),
-				statusPath)
-		} else if desc, ok := e.openvpnClientDescs[fields[0]]; ok && len(fields) == 2 {
-			// Traffic counters.
-			value, err := strconv.ParseFloat(fields[1], 64)
-			if err != nil {
-				return err
-			}
-			ch <- prometheus.MustNewConstMetric(
-				desc,
-				prometheus.CounterValue,
-				value,
-				statusPath)
-		} else {
-			return fmt.Errorf("unsupported key: %q", fields[0])
+		metric, err := parseClientStatus(statusPath, fields, e.openvpnStatusUpdateTimeDesc, e.openvpnClientDescs)
+		if err != nil {
+			return err
+		}
+		if metric != nil {
+			ch <- metric
 		}
 	}
 	return scanner.Err()
 }
 
+func parseClientStatus(
+	statusPath string,
+	fields []string,
+	updateTimeDesc *prometheus.Desc,
+	clientDescs map[string]*prometheus.Desc) (prometheus.Metric, error) {
+	if fields[0] == "END" && len(fields) == 1 {
+		// Stats footer.
+		return nil, nil
+	} else if fields[0] == "OpenVPN STATISTICS" && len(fields) == 1 {
+		// Stats header.
+		return nil, nil
+	} else if fields[0] == "Updated" && len(fields) == 2 {
+		updatedTime, err := parseUpdatedTime(fields[1])
+		if err != nil {
+			return nil, err
+		}
+		return prometheus.MustNewConstMetric(
+			updateTimeDesc,
+			prometheus.GaugeValue,
+			updatedTime,
+			statusPath), nil
+	} else if desc, ok := clientDescs[fields[0]]; ok && len(fields) == 2 {
+		// Traffic counters.
+		value, err := strconv.ParseFloat(fields[1], 64)
+		if err != nil {
+			return nil, err
+		}
+		return prometheus.MustNewConstMetric(
+			desc,
+			prometheus.CounterValue,
+			value,
+			statusPath), nil
+	}
+	return nil, fmt.Errorf("unsupported key: %q", fields[0])
+}
+
+func parseUpdatedTime(updated string) (float64, error) {
+	if timeParser, err := time.ParseInLocation(time.ANSIC, updated, time.Local); err == nil {
+		return float64(timeParser.Unix()), err
+	}
+	if timeParser, err := time.ParseInLocation("2006-01-02 15:04:05", updated, time.Local); err == nil {
+		return float64(timeParser.Unix()), err
+	} else {
+		return 0, err
+	}
+}
+
 func (e *OpenVPNExporter) collectStatusFromFile(statusPath string, ch chan<- prometheus.Metric) error {
 	conn, err := os.Open(statusPath)
-	defer conn.Close()
 	if err != nil {
 		return err
 	}
+	defer conn.Close()
 	return e.collectStatusFromReader(statusPath, conn, ch)
 }
 
