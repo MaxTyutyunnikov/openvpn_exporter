@@ -21,10 +21,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/MaxTyutyunnikov/openvpn_exporter/exporters"
 	"github.com/MaxTyutyunnikov/openvpn_exporter/pkg/version"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func main() {

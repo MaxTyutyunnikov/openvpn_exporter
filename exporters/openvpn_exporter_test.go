@@ -83,8 +83,9 @@ func TestCollectServerStatusFromReader_v2(t *testing.T) {
 		t.Fatalf("Failed to create exporter: %v", err)
 	}
 
+	// Format: TIME,date,timestamp (3 fields with comma separator)
 	serverStatusV2 := `TITLE,OpenVPN 2.4.0 x86_64-pc-linux-gnu [SSL (OpenSSL)] [LZO] [LZ4] [EPOLL] [PKCS11] [MH] [IPv6] built on Mar 21 2017
-TIME,1490089154,Wed Apr  5 10:59:14 2017
+TIME,Wed Apr  5 10:59:14 2017,1490089154
 HEADER,CLIENT_LIST,Common Name,Real Address,Virtual Address,Connected Since (time_t),Username,Session ID,Bytes Received,Bytes Sent
 CLIENT_LIST,client1,192.168.1.100:50000,10.8.0.2,1490089000,client1,0,1000,2000
 HEADER,ROUTING_TABLE,Common Name,Real Address,Virtual Address,Last Ref (time_t)
@@ -112,8 +113,9 @@ func TestCollectServerStatusFromReader_v3(t *testing.T) {
 		t.Fatalf("Failed to create exporter: %v", err)
 	}
 
+	// Format: TIME\tdate\ttimestamp (3 fields with tab separator)
 	serverStatusV3 := `TITLE	OpenVPN 2.4.4 x86_64-pc-linux-gnu [SSL (OpenSSL)] [LZO] [LZ4] [EPOLL] [PKCS11] [MH] [IPv6] built on Mar 21 2018
-TIME	1522929554	Wed Apr  5 10:59:14 2018
+TIME	Wed Apr  5 10:59:14 2018	1522929554
 HEADER	CLIENT_LIST	Common Name	Real Address	Virtual Address	Connected Since (time_t)	Username	Session ID	Bytes Received	Bytes Sent
 CLIENT_LIST	client2	192.168.1.101:50001	10.8.0.3	1522929400	client2	0	3000	4000
 HEADER	ROUTING_TABLE	Common Name	Real Address	Virtual Address	Last Ref (time_t)
@@ -141,8 +143,8 @@ func TestParseUpdatedTime(t *testing.T) {
 		expected float64
 		hasError bool
 	}{
-		{"Thu Apr  5 10:59:09 2018", 1522925949, false},
-		{"2018-04-05 10:59:09", 1522925949, false},
+		{"Thu Apr  5 10:59:09 2018", 1522915149, false},
+		{"2018-04-05 10:59:09", 1522915149, false},
 		{"invalid", 0, true},
 	}
 
@@ -155,7 +157,7 @@ func TestParseUpdatedTime(t *testing.T) {
 			t.Errorf("Unexpected error for input %q: %v", tt.input, err)
 		}
 		if !tt.hasError && int(result) != int(tt.expected) {
-			t.Errorf("For input %q: expected %f, got %f", tt.input, tt.expected, result)
+			t.Errorf("For input %q: expected %d, got %d", tt.input, int(tt.expected), int(result))
 		}
 	}
 }

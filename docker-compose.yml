@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  openvpn_exporter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-dev}
+        COMMIT_SHA1: ${COMMIT_SHA1:-unknown}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
+    image: MaxTyutyunnikov/openvpn-exporter:latest
+    container_name: openvpn_exporter
+    ports:
+      - "9176:9176"
+    volumes:
+      - ./examples:/etc/openvpn:ro
+    command:
+      - "-openvpn.status_paths"
+      - "/etc/openvpn/client.status,/etc/openvpn/server2.status,/etc/openvpn/server3.status"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/openvpn_exporter", "-version"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+# Example with OpenVPN server (uncomment to use)
+# openvpn:
+#   image: kylemanna/openvpn:latest
+#   container_name: openvpn
+#   ports:
+#     - "1194:1194/udp"
+#   volumes:
+#     - ./openvpn-data/conf:/etc/openvpn
+#   cap_add:
+#     - NET_ADMIN
+#   restart: unless-stopped
