@@ -15,13 +15,16 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/MaxTyutyunnikov/openvpn_exporter/exporters"
+	"github.com/MaxTyutyunnikov/openvpn_exporter/pkg/version"
 )
 
 func main() {
@@ -30,10 +33,17 @@ func main() {
 		metricsPath        = flag.String("web.telemetry-path", "/metrics", "Path under which to expose metrics.")
 		openvpnStatusPaths = flag.String("openvpn.status_paths", "examples/client.status,examples/client2.status,examples/server2.status,examples/server3.status", "Paths at which OpenVPN places its status files.")
 		ignoreIndividuals  = flag.Bool("ignore.individuals", false, "If ignoring metrics for individuals")
+		showVersion        = flag.Bool("version", false, "Print version information and exit")
 	)
 	flag.Parse()
 
+	if *showVersion {
+		fmt.Println(version.GetVersion())
+		os.Exit(0)
+	}
+
 	log.Printf("Starting OpenVPN Exporter\n")
+	log.Printf("Version: %s\n", version.GetVersion())
 	log.Printf("Listen address: %v\n", *listenAddress)
 	log.Printf("Metrics path: %v\n", *metricsPath)
 	log.Printf("openvpn.status_path: %v\n", *openvpnStatusPaths)
